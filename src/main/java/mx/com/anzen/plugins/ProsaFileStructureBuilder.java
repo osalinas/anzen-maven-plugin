@@ -29,20 +29,29 @@ public class ProsaFileStructureBuilder {
 		this.libDirectory = libDirectory;
 	}
 
-	public List<FilesMapping> makeFileStructure() throws IOException {
+	/**
+	 * Makes the folders hierarchy and copy the mapping.
+	 *
+	 * @return {@link List}&lt;{@link FilesMaping}&gt; a file List has had been
+	 *         copied.
+	 * @throws IOException
+	 */
+	public void makeFileStructure() throws IOException {
 
 		if (project.hasParent()) {
-			return null;
+			return;
 		}
 
-		makeDefauldFileStructure();
+		makeDefaultFileStructure();
+
 		File base = new File(project.getBasedir(), rootDirectory);
-		List<FilesMapping> restoringMap = new ArrayList<FilesMapping>();
 		log.info("Base directory: " + base.getAbsolutePath());
 		for (FilesMapping fm : filesMapping) {
 
 			File target = new File(base, fm.getDestinationDirectory());
 
+			// just creates a directory and this directory is not considered for
+			// restoring.
 			if (fm.getSourceDirectory() == null || fm.getSourceDirectory().trim().isEmpty()) {
 				target.mkdirs();
 				log.info("mkdir(s): " + fm.getDestinationDirectory());
@@ -58,13 +67,15 @@ public class ProsaFileStructureBuilder {
 			} else {
 				FileUtils.copyFile(origin, target);
 			}
-			restoringMap.add(fm);
+
 			log.info("Copy: " + fm.getSourceDirectory() + " => " + fm.getDestinationDirectory());
 		}
-		return restoringMap;
 	}
 
-	private void makeDefauldFileStructure() {
+	/**
+	 * Build the default file structure indicated by PROSA.
+	 */
+	private void makeDefaultFileStructure() {
 		log.info("Making file system");
 		File base = new File(project.getBasedir(), rootDirectory);
 		for (String path : prosaFileStructure) {
@@ -73,7 +84,13 @@ public class ProsaFileStructureBuilder {
 		}
 	}
 
-	public void getDependencies() throws IOException {
+	/**
+	 * Copy from Maven local repository all dependencies and paste these on lib
+	 * directory.
+	 *
+	 * @throws IOException
+	 */
+	public void copyDependencies() throws IOException {
 		@SuppressWarnings("unchecked")
 		List<Artifact> artifactsList = new ArrayList<Artifact>(project.getArtifacts());
 		File f = getLibFile();
@@ -85,6 +102,14 @@ public class ProsaFileStructureBuilder {
 		log.info("Ok");
 	}
 
+	/**
+	 * Build the lib directory. The File object returned is builded based on the
+	 * modules of Maven project (project) to achieve a minimal organization for
+	 * the dependencies for each modules.
+	 *
+	 * @return {@link File} .- A File object representing the absolute path of
+	 *         lib directory.
+	 */
 	public File getLibFile() {
 		File f = null;
 		if (project.hasParent()) {
@@ -97,13 +122,4 @@ public class ProsaFileStructureBuilder {
 		}
 		return f;
 	}
-
-	// @SuppressWarnings({ "unused", "unchecked" })
-	// private void printArtifactsMap() {
-	// Map<Object, Object> map = project.getArtifactMap();
-	// Set<Entry<Object, Object>> set = map.entrySet();
-	// for (Entry<Object, Object> entry : set) {
-	// log.debug(entry.getKey() + "   ======>   " + entry.getValue());
-	// }
-	// }
 }

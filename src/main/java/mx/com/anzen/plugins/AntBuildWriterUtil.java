@@ -109,7 +109,6 @@ public class AntBuildWriterUtil {
 	 * @param wrapper
 	 * @throws IOException
 	 */
-	@SuppressWarnings("unchecked")
 	public static void writeJavadocTask(XMLWriter writer, MavenProject project, ArtifactResolverWrapper wrapper) throws IOException {
 		List<String> sources = new ArrayList<String>();
 		List<String> sourceRoots = project.getCompileSourceRoots();

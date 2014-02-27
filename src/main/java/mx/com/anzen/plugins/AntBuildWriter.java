@@ -25,7 +25,6 @@ import org.apache.maven.plugin.logging.SystemStreamLog;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.settings.Settings;
 import org.apache.tools.ant.Main;
-import org.apache.tools.ant.types.AntFilterReader;
 import org.codehaus.plexus.util.FileUtils;
 import org.codehaus.plexus.util.IOUtil;
 import org.codehaus.plexus.util.StringUtils;
@@ -110,7 +109,7 @@ public class AntBuildWriter {
 	/**
 	 * Mapping for restoring files to original strucure.
 	 */
-	private List<FilesMapping> restoreMapping;
+	private List<FilesMapping> filesMappings;
 
 	private boolean overwrite;
 
@@ -139,8 +138,8 @@ public class AntBuildWriter {
 	 * 
 	 * @throws IOException
 	 */
-	protected void writeBuildXmls(List<FilesMapping> restoreMapping, String webappDirectory) throws IOException {
-		this.restoreMapping = restoreMapping;
+	protected void writeBuildXmls(List<FilesMapping> filesMappings, String webappDirectory) throws IOException {
+		this.filesMappings = filesMappings;
 		this.webappDirectory = webappDirectory;
 		writeGeneratedBuildXml();
 	}
@@ -217,10 +216,10 @@ public class AntBuildWriter {
 		}
 
 		// test.reports
-		addProperty(properties, antTestReports, "${" + antParentDir + "}javadocs${" + antBuildModuleDir + "}"+FS+"test-reports");
+		addProperty(properties, antTestReports, "${" + antParentDir + "}javadocs${" + antBuildModuleDir + "}" + FS + "test-reports");
 
 		// javadoc.dir
-		addProperty(properties, antJavadocDir, "${" + antParentDir + "}javadocs${" + antBuildModuleDir + "}"+FS+"javadoc");
+		addProperty(properties, antJavadocDir, "${" + antParentDir + "}javadocs${" + antBuildModuleDir + "}" + FS + "javadoc");
 
 		// reporting.outputDirectory
 		String reportingOutputDir = project.getReporting().getOutputDirectory();
@@ -231,7 +230,7 @@ public class AntBuildWriter {
 				"${" + antParentDir + "}${" + antBuildModuleDir + "}" + AntBuildWriterUtil.toRelative(new File(project.getBuild().getDirectory()), reportingOutputDir));
 
 		// build.classpath.dir
-		addProperty(properties, antBuildClasspathDir, "${" + antParentDir + "}" + libDirectory+ "${" + antBuildModuleDir + "}");
+		addProperty(properties, antBuildClasspathDir, "${" + antParentDir + "}" + libDirectory + "${" + antBuildModuleDir + "}");
 
 		// ----------------------------------------------------------------------
 		// Settings properties
@@ -258,12 +257,42 @@ public class AntBuildWriter {
 		}
 	}
 
+	/**
+	 * Generate an <code>build.xml</code>
+	 *
+	 * @see #DEFAULT_MAVEN_BUILD_FILENAME
+	 * @throws IOException
+	 */
+	private void writeGeneratedBuildXml() throws IOException {
+
+		String encoding = "UTF-8";
+		String doctype = getDoctype();
+		String lineIndenter = StringUtils.repeat(" ", DEFAULT_INDENTATION_SIZE);
+		File outputFile = getBulidFile(DEFAULT_BUILD_FILENAME);
+
+		OutputStreamWriter osw = new OutputStreamWriter(new FileOutputStream(outputFile), encoding);
+
+		XMLWriter writer = new PrettyPrintXMLWriter(osw, lineIndenter, encoding, doctype);
+
+		writeAntTargets(writer);
+
+		IOUtil.close(osw);
+	}
+
+	private String getDoctype(){
+		String doctype = null;
+		if(!project.hasParent()){
+			doctype = "project [<!ENTITY include SYSTEM \"../common/commonProsa.xml\">]";
+		}
+		return doctype;
+	}
+
 	private File getBulidFile(String nameFile) {
 		File f = null;
 		if (project.hasParent()) {
 			String aux = project.getParent().getFile().getParent();
-			aux += File.separator + rootDirectory + File.separator + "configFiles";
-			aux += File.separator + project.getFile().getParentFile().getName();
+			aux += FS + rootDirectory + FS + "configFiles";
+			aux += FS + project.getFile().getParentFile().getName();
 			f = new File(aux);
 		} else {
 			f = new File(project.getBasedir(), rootDirectory);
@@ -272,20 +301,7 @@ public class AntBuildWriter {
 		return new File(f, nameFile);
 	}
 
-	/**
-	 * Generate an <code>build.xml</code>
-	 * 
-	 * @see #DEFAULT_MAVEN_BUILD_FILENAME
-	 * @throws IOException
-	 */
-	private void writeGeneratedBuildXml() throws IOException {
-
-		String encoding = "UTF-8";
-		String docType = null;// "project [<ENTITY include SYSTEM \"../common/commonProsa.xml\">]";
-		File outputFile = getBulidFile(DEFAULT_BUILD_FILENAME);
-		OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(outputFile), encoding);
-		XMLWriter writer = new PrettyPrintXMLWriter(w, StringUtils.repeat(" ", DEFAULT_INDENTATION_SIZE), encoding, docType);
-
+	private void writeAntTargets(XMLWriter writer) throws IOException {
 		// <project/>
 		writeAntProject(writer);
 
@@ -298,10 +314,11 @@ public class AntBuildWriter {
 		// <target name="clean" />
 		writeCleanTarget(writer);
 
-		// -----------------------------------------------------------------------
 		// <target name="setup"/>
-		// -----------------------------------------------------------------------
 		writeSetupTarget(writer);
+
+		// <target name="files"/>
+		writeFilesTarget(writer);
 
 		// <target name="compile" />
 		List compileSourceRoots = AntBuildWriterUtil.removeEmptyCompileSourceRoots(project.getCompileSourceRoots());
@@ -311,7 +328,8 @@ public class AntBuildWriter {
 		// <target name="compile-tests" />
 		// ----------------------------------------------------------------------
 
-		List testCompileSourceRoots = AntBuildWriterUtil.removeEmptyCompileSourceRoots(project.getTestCompileSourceRoots());
+		List testCompileSourceRoots = AntBuildWriterUtil.removeEmptyCompileSourceRoots(project
+				.getTestCompileSourceRoots());
 		writeCompileTestsTarget(writer, testCompileSourceRoots);
 
 		// ----------------------------------------------------------------------
@@ -340,8 +358,6 @@ public class AntBuildWriter {
 		writer.endElement(); // project
 
 		XmlWriterUtil.writeLineBreak(writer);
-
-		IOUtil.close(w);
 	}
 
 	private void writeAntProject(XMLWriter writer) {
@@ -350,17 +366,24 @@ public class AntBuildWriter {
 		writer.addAttribute("default", "package");
 		writer.addAttribute("basedir", ".");
 		XmlWriterUtil.writeLineBreak(writer);
+		if(!project.hasParent()){
+			writer.writeMarkup("  &include;");
+		}
 	}
 
 	/**
-	 * Write properties in the writer only for a non-POM project.
-	 * 
-	 * @param writer
+	 * Write properties in the writer (build.xml).
+	 *
+	 * @param writer .- An not-null {@link XMLWriter} object.
 	 */
-	@SuppressWarnings("unchecked")
 	private void writeProperties(XMLWriter writer) {
 
 		XmlWriterUtil.writeCommentText(writer, "Build environment properties", 1);
+
+		// environment
+		writer.startElement("property");
+		writer.addAttribute("environment", "env");
+		writer.endElement();// property
 
 		// build.finalName
 		writer.startElement("property");
@@ -413,7 +436,10 @@ public class AntBuildWriter {
 		// build.outputDir
 		writer.startElement("property");
 		writer.addAttribute("name", antBuildOutputDir);
-		writer.addAttribute("value", "${" + antBaseDir + "}" + FS + AntBuildWriterUtil.toRelative(project.getBasedir(), project.getBuild().getOutputDirectory()));
+		writer.addAttribute(
+				"value",
+				"${" + antBaseDir + "}" + FS
+						+ AntBuildWriterUtil.toRelative(project.getBasedir(), project.getBuild().getOutputDirectory()));
 		writer.endElement(); // property
 
 		// build.srcDir.
@@ -422,7 +448,10 @@ public class AntBuildWriter {
 			for (int i = 0; i < compileSourceRoots.length; i++) {
 				writer.startElement("property");
 				writer.addAttribute("name", antBuildSrcDir + i);
-				writer.addAttribute("value", "${" + antBaseDir + "}" + FS + AntBuildWriterUtil.toRelative(project.getBasedir(), compileSourceRoots[i]));
+				writer.addAttribute(
+						"value",
+						"${" + antBaseDir + "}" + FS
+								+ AntBuildWriterUtil.toRelative(project.getBasedir(), compileSourceRoots[i]));
 				writer.endElement(); // property
 			}
 		}
@@ -433,7 +462,10 @@ public class AntBuildWriter {
 			for (int i = 0; i < array.length; i++) {
 				writer.startElement("property");
 				writer.addAttribute("name", antBuildResourceDir + i);
-				writer.addAttribute("value", "${" + antBaseDir + "}" + FS + AntBuildWriterUtil.toRelative(project.getBasedir(), array[i].getDirectory()));
+				writer.addAttribute(
+						"value",
+						"${" + antBaseDir + "}" + FS
+								+ AntBuildWriterUtil.toRelative(project.getBasedir(), array[i].getDirectory()));
 				writer.endElement(); // property
 			}
 		}
@@ -441,7 +473,14 @@ public class AntBuildWriter {
 		// ${build.dir}/target/test-clases
 		writer.startElement("property");
 		writer.addAttribute("name", antBuildTestOutputDir);
-		writer.addAttribute("value", "${" + antBaseDir + "}" + FS + AntBuildWriterUtil.toRelative(project.getBasedir(), project.getBuild().getTestOutputDirectory()));
+		writer.addAttribute(
+				"value",
+				"${"
+						+ antBaseDir
+						+ "}"
+						+ FS
+						+ AntBuildWriterUtil.toRelative(project.getBasedir(), project.getBuild()
+								.getTestOutputDirectory()));
 		writer.endElement(); // property
 
 		// build.testDir.
@@ -450,7 +489,10 @@ public class AntBuildWriter {
 			for (int i = 0; i < compileSourceRoots.length; i++) {
 				writer.startElement("property");
 				writer.addAttribute("name", antBuildTestDir + i);
-				writer.addAttribute("value", "${" + antBaseDir + "}" + FS + AntBuildWriterUtil.toRelative(project.getBasedir(), compileSourceRoots[i]));
+				writer.addAttribute(
+						"value",
+						"${" + antBaseDir + "}" + FS
+								+ AntBuildWriterUtil.toRelative(project.getBasedir(), compileSourceRoots[i]));
 				writer.endElement(); // property
 			}
 		}
@@ -461,7 +503,10 @@ public class AntBuildWriter {
 			for (int i = 0; i < array.length; i++) {
 				writer.startElement("property");
 				writer.addAttribute("name", antBuildTestResourceDir + i);
-				writer.addAttribute("value", "${" + antBaseDir + "}" + FS + AntBuildWriterUtil.toRelative(project.getBasedir(), array[i].getDirectory()));
+				writer.addAttribute(
+						"value",
+						"${" + antBaseDir + "}" + FS
+								+ AntBuildWriterUtil.toRelative(project.getBasedir(), array[i].getDirectory()));
 				writer.endElement(); // property
 			}
 		}
@@ -469,7 +514,8 @@ public class AntBuildWriter {
 		// test.reports
 		writer.startElement("property");
 		writer.addAttribute("name", antTestReports);
-		writer.addAttribute("value", "${" + antParentDir + "}javadocs${" + antBuildModuleDir + "}" + FS + "test-reports");
+		writer.addAttribute("value", "${" + antParentDir + "}javadocs${" + antBuildModuleDir + "}" + FS
+				+ "test-reports");
 		writer.endElement(); // property
 
 		// javadoc.dir
@@ -485,7 +531,15 @@ public class AntBuildWriter {
 		}
 		writer.startElement("property");
 		writer.addAttribute("name", antReportingOutputDirectory);
-		writer.addAttribute("value", "${" + antParentDir + "}${" + antBuildModuleDir + "}" + AntBuildWriterUtil.toRelative(new File(project.getBuild().getDirectory()), reportingOutputDir));
+		writer.addAttribute(
+				"value",
+				"${"
+						+ antParentDir
+						+ "}${"
+						+ antBuildModuleDir
+						+ "}"
+						+ AntBuildWriterUtil
+								.toRelative(new File(project.getBuild().getDirectory()), reportingOutputDir));
 		writer.endElement(); // property
 
 		// build.classpath.dir
@@ -513,13 +567,13 @@ public class AntBuildWriter {
 		XmlWriterUtil.writeLineBreak(writer);
 	}
 
-	private String getParentName(){
-		if(project.hasParent()){
+	private String getParentName() {
+		if (project.hasParent()) {
 			return project.getParent().getBuild().getFinalName();
 		}
 		return project.getBuild().getFinalName();
 	}
-	
+
 	private String getParentSubPath() {
 		if (project.hasParent()) {
 			return ".." + FS + ".." + FS + ".." + FS;
@@ -543,7 +597,7 @@ public class AntBuildWriter {
 
 	/**
 	 * Write path definition in the writer only for a non-POM project.
-	 * 
+	 *
 	 * @param writer
 	 */
 	private void writeBuildPathDefinition(XMLWriter writer) {
@@ -560,19 +614,19 @@ public class AntBuildWriter {
 		XmlWriterUtil.writeLineBreak(writer);
 	}
 
+	@SuppressWarnings("rawtypes")
 	private void writeBuildPathDefinition(XMLWriter writer, String id, List artifacts) {
 
 		writer.startElement("path");
 		writer.addAttribute("id", id);
 		writer.startElement("fileset");
 		writer.addAttribute("dir", "${" + antBuildClasspathDir + "}");
-		writer.startElement("include");
-		writer.addAttribute("name", "*.jar");
-		writer.endElement();// include
+		writer.addAttribute("includes", "*.jar");
 		writer.endElement();// fileset
 		writer.endElement();// path
 	}
 
+	@SuppressWarnings({ "unused", "rawtypes", "unchecked" })
 	private String getUninterpolatedSystemPath(Artifact artifact) {
 		String managementKey = artifact.getDependencyConflictId();
 
@@ -622,27 +676,38 @@ public class AntBuildWriter {
 
 	/**
 	 * Write clean target in the writer depending the packaging of the project.
-	 * 
+	 *
 	 * @param writer
 	 */
+	@SuppressWarnings("unchecked")
 	private void writeCleanTarget(XMLWriter writer) {
 		XmlWriterUtil.writeCommentText(writer, "Cleaning up target", 1);
 
 		writer.startElement("target");
-		writer.addAttribute("name", "clean");
+		writer.addAttribute("name", "cleanup");
 		writer.addAttribute("description", "Clean the output directory");
 
 		if (AntBuildWriterUtil.isPomPackaging(project)) {
 			if (project.getModules() != null) {
 				List<String> modules = project.getModules();
 				for (String moduleSubPath : modules) {
-					AntBuildWriterUtil.writeAntTask(writer, project, moduleSubPath, "clean");
+					AntBuildWriterUtil.writeAntTask(writer, project, moduleSubPath, "cleanup");
 				}
 			}
 		} else {
 			writer.startElement("delete");
+			writer.addAttribute("includeemptydirs", "true");
+			// writer.addAttribute("dir", "${" + antBuildDir + "}");
+			// writer.addAttribute("includes", "**/*");
+			writer.startElement("fileset");
 			writer.addAttribute("dir", "${" + antBuildDir + "}");
+			writer.addAttribute("includes", "**/*");
+			writer.endElement(); // fileset
 			writer.endElement(); // delete
+			writer.startElement("echo");
+			writer.addAttribute("message", "deleted content : ${" + antParentDir + "}${" + antBuildModuleDir + "}${"
+					+ antBuildDir + "}" + FS);
+			writer.endElement();// echo
 		}
 
 		writer.endElement(); // target
@@ -653,42 +718,40 @@ public class AntBuildWriter {
 	/**
 	 * Write compile target in the writer depending the packaging of the
 	 * project.
-	 * 
+	 *
 	 * @param writer
 	 * @param compileSourceRoots
 	 * @throws IOException
 	 */
+	@SuppressWarnings("rawtypes")
 	private void writeCompileTarget(XMLWriter writer, List compileSourceRoots) throws IOException {
 		XmlWriterUtil.writeCommentText(writer, "Compilation target", 1);
 
+		writer.startElement("target");
+		writer.addAttribute("name", "compile");
+		writer.addAttribute("depends", "files,setup");
+		writer.addAttribute("description", "Compile the code");
+
 		if (AntBuildWriterUtil.isPomPackaging(project)) {
-			writer.startElement("target");
-			writer.addAttribute("name", "compile");
-			writer.addAttribute("description", "Compile the code");
 			if (project.getModules() != null) {
 				for (Iterator it = project.getModules().iterator(); it.hasNext();) {
 					String moduleSubPath = (String) it.next();
 					AntBuildWriterUtil.writeAntTask(writer, project, moduleSubPath, "compile");
 				}
 			}
-			writer.endElement(); // target
 		} else {
-			writer.startElement("target");
-			writer.addAttribute("name", "compile");
-			writer.addAttribute("description", "Compile the code");
-
-			writeCompileTasks(writer, "${" + antBuildOutputDir + "}", compileSourceRoots, project.getBuild().getResources(), null, false);
-
-			writer.endElement(); // target
+			writeCompileTasks(writer, "${" + antBuildOutputDir + "}", compileSourceRoots, project.getBuild()
+					.getResources(), null, false);
 		}
 
+		writer.endElement(); // target
 		XmlWriterUtil.writeLineBreak(writer);
 	}
 
 	/**
 	 * Write compile-test target in the writer depending the packaging of the
 	 * project.
-	 * 
+	 *
 	 * @param writer
 	 * @param testCompileSourceRoots
 	 * @throws IOException
@@ -699,6 +762,7 @@ public class AntBuildWriter {
 		if (AntBuildWriterUtil.isPomPackaging(project)) {
 			writer.startElement("target");
 			writer.addAttribute("name", "compile-tests");
+			writer.addAttribute("depends", "files,setup");
 			writer.addAttribute("description", "Compile the test code");
 			if (project.getModules() != null) {
 				List<String> modules = project.getModules();
@@ -714,7 +778,8 @@ public class AntBuildWriter {
 			AntBuildWriterUtil.addWrapAttribute(writer, "target", "description", "Compile the test code", 2);
 			AntBuildWriterUtil.addWrapAttribute(writer, "target", "unless", antTestSkip, 2);
 
-			writeCompileTasks(writer, "${" + antBuildTestOutputDir + "}", testCompileSourceRoots, project.getBuild().getTestResources(), "${" + antBuildOutputDir + "}", true);
+			writeCompileTasks(writer, "${" + antBuildTestOutputDir + "}", testCompileSourceRoots, project.getBuild()
+					.getTestResources(), "${" + antBuildOutputDir + "}", true);
 
 			writer.endElement(); // target
 		}
@@ -724,7 +789,7 @@ public class AntBuildWriter {
 
 	/**
 	 * Write test target in the writer depending the packaging of the project.
-	 * 
+	 *
 	 * @param writer
 	 * @param testCompileSourceRoots
 	 */
@@ -734,6 +799,7 @@ public class AntBuildWriter {
 		if (AntBuildWriterUtil.isPomPackaging(project)) {
 			writer.startElement("target");
 			writer.addAttribute("name", "test");
+			writer.addAttribute("depends", "files,setup");
 			writer.addAttribute("description", "Run the test cases");
 			if (project.getModules() != null) {
 				for (Iterator it = project.getModules().iterator(); it.hasNext();) {
@@ -880,7 +946,7 @@ public class AntBuildWriter {
 
 	/**
 	 * Gets the include patterns for the unit tests.
-	 * 
+	 *
 	 * @return A list of strings with include patterns, might be empty but never
 	 *         <code>null</code>.
 	 */
@@ -894,7 +960,7 @@ public class AntBuildWriter {
 
 	/**
 	 * Gets the exclude patterns for the unit tests.
-	 * 
+	 *
 	 * @return A list of strings with exclude patterns, might be empty but never
 	 *         <code>null</code>.
 	 */
@@ -909,7 +975,7 @@ public class AntBuildWriter {
 	/**
 	 * Write the <code>&lt;fileset&gt;</code> elements for the test compile
 	 * source roots.
-	 * 
+	 *
 	 * @param writer
 	 * @param testCompileSourceRoots
 	 * @param includes
@@ -926,6 +992,7 @@ public class AntBuildWriter {
 		}
 	}
 
+	@SuppressWarnings("unchecked")
 	private void writeSetupTarget(XMLWriter writer) throws IOException {
 
 		XmlWriterUtil.writeCommentText(writer, "Setup target", 1);
@@ -934,51 +1001,62 @@ public class AntBuildWriter {
 		writer.addAttribute("name", "setup");
 		writer.addAttribute("description", "Setup file system.");
 
-		// If there isn't nothing to setup set an ant target dummy.
-		if (restoreMapping == null) {
+		// If there isn't something to setup then set an ant target dummy.
+		if (filesMappings == null || filesMappings.size() == 0 || project.hasParent()) {
 			writer.startElement("echo");
-			writer.writeText("Nothing to setup.");
+			writer.addAttribute("message", "Nothing to setup.");
 			writer.endElement();// echo
 			writer.endElement();// target
 			return;
 		}
 
-		for (FilesMapping fm : restoreMapping) {
+		for (FilesMapping fm : filesMappings) {
+
+			if (fm.isConfigFile() || !fm.isRestorable()) {
+				continue;
+			}
+
 			File target = new File(new File(project.getBasedir(), rootDirectory), fm.getDestinationDirectory());
 			File origin = new File(project.getBasedir(), fm.getSourceDirectory());
+
 			writer.startElement("copy");
 			if (target.isDirectory() && origin.isDirectory()) {
-				writer.addAttribute("todir", "${" + antBuildDir + "}" + File.separator + "${" + antBuildFinalName + "}" + File.separator + fm.getSourceDirectory());
+				writer.addAttribute("todir",
+						"${" + antBuildDir + "}" + FS + "${" + antBuildFinalName + "}" + FS + fm.getSourceDirectory());
 				writer.startElement("fileset");
 				writer.addAttribute("dir", fm.getDestinationDirectory());
-				writer.startElement("include");
-				writer.addAttribute("name", "**");
-				writer.endElement();// include
+				writer.addAttribute("includes", "**");
+				// writer.startElement("include");
+				// writer.addAttribute("name", "**");
+				// writer.endElement();// include
 				writer.endElement();// fileset
 			} else if (target.isDirectory() && origin.isFile()) {
-				writer.addAttribute("file", fm.getDestinationDirectory() + File.separator + origin.getName());
-				writer.addAttribute("toFile", "${" + antBuildDir + "}" + File.separator + "${" + antBuildFinalName + "}" + File.separator + fm.getSourceDirectory());
+				writer.addAttribute("file", fm.getDestinationDirectory() + FS + origin.getName());
+				writer.addAttribute("toFile",
+						"${" + antBuildDir + "}" + FS + "${" + antBuildFinalName + "}" + FS + fm.getSourceDirectory());
 				writer.addAttribute("overwrite", "true");
 			} else if (target.isFile() && origin.isFile()) {
 				writer.addAttribute("file", fm.getDestinationDirectory());
-				writer.addAttribute("toFile", "${" + antBuildDir + "}" + File.separator + "${" + antBuildFinalName + "}" + File.separator + fm.getSourceDirectory());
+				writer.addAttribute("toFile", "${" + antBuildDir + "}" + File.separator + "${" + antBuildFinalName
+						+ "}" + File.separator + fm.getSourceDirectory());
 				writer.addAttribute("overwrite", "true");
 			}
 			writer.endElement();// copy
 		}
 
 		if (AntBuildWriterUtil.isPomPackaging(project)) {
-			String fp = File.separator;
 			if (project.getModules() != null) {
 				List<String> modules = project.getModules();
 				for (String moduleSubPath : modules) {
 					writer.startElement("copy");
-					writer.addAttribute("file", "configFiles" + fp + moduleSubPath + fp + "build.xml");
-					writer.addAttribute("toFile", "${" + antBuildDir + "}" + fp + "${" + antBuildFinalName + "}" + fp + moduleSubPath + fp + "build.xml");
+					writer.addAttribute("file", "configFiles" + FS + moduleSubPath + FS + "build.xml");
+					writer.addAttribute("toFile", "${" + antBuildDir + "}" + FS + "${" + antBuildFinalName + "}" + FS
+							+ moduleSubPath + FS + "build.xml");
 					writer.endElement();
 					writer.startElement("copy");
-					writer.addAttribute("file", "configFiles" + fp + moduleSubPath + fp + "build.properties");
-					writer.addAttribute("toFile", "${" + antBuildDir + "}" + fp + "${" + antBuildFinalName + "}" + fp + moduleSubPath + fp + "build.properties");
+					writer.addAttribute("file", "configFiles" + FS + moduleSubPath + FS + "build.properties");
+					writer.addAttribute("toFile", "${" + antBuildDir + "}" + FS + "${" + antBuildFinalName + "}" + FS
+							+ moduleSubPath + FS + "build.properties");
 					writer.endElement();
 				}
 			}
@@ -986,10 +1064,72 @@ public class AntBuildWriter {
 		writer.endElement();// target
 	}
 
+	private void writeFilesTarget(XMLWriter writer) throws IOException {
+
+		XmlWriterUtil.writeCommentText(writer, "Files target", 1);
+
+		writer.startElement("target");
+		writer.addAttribute("name", "files");
+		writer.addAttribute("depends", "setup");
+		writer.addAttribute("description", "Setup config files.");
+
+		if (filesMappings == null || filesMappings.size() == 0 || project.hasParent()) {
+			writer.startElement("echo");
+			writer.writeText("There are no files.");
+			writer.endElement();// echo
+			writer.endElement();// target
+			return;
+		}
+
+		for (FilesMapping fm : filesMappings) {
+			File target = new File(fm.getDestinationDirectory());
+
+			if (fm.isConfigFile()) {
+				String fileName = FileUtils.removeExtension(target.getName());
+				fileName = fileName.substring(0, fileName.length() - 4);
+				String ext = FileUtils.getExtension(target.getName());
+				String pathDest = FileUtils.getPath(fm.getSourceDirectory());
+				String pathOrig = FileUtils.getPath(fm.getDestinationDirectory());
+
+				printAntcall(writer, pathOrig, fileName, fileName, ext, pathDest);
+			}
+		}
+		writer.endElement();// target
+	}
+
+	private void printAntcall(XMLWriter writer, String varConfigFiles, String varFileSrc, String varFileDes,
+			String varFileExt, String varPathDest) {
+		writer.startElement("antcall");
+		writer.addAttribute("target", "ambiente");
+		writer.addAttribute("inheritAll", "false");
+		writer.addAttribute("inheritRefs", "false");
+		writer.startElement("param");
+		writer.addAttribute("name", "var.config.files");
+		writer.addAttribute("value", varConfigFiles);
+		writer.endElement();// param
+		writer.startElement("param");
+		writer.addAttribute("name", "var.file.src");
+		writer.addAttribute("value", varFileSrc);
+		writer.endElement();// param
+		writer.startElement("param");
+		writer.addAttribute("name", "var.file.des");
+		writer.addAttribute("value", varFileDes);
+		writer.endElement();// param
+		writer.startElement("param");
+		writer.addAttribute("name", "var.file.ext");
+		writer.addAttribute("value", varFileExt);
+		writer.endElement();// param
+		writer.startElement("param");
+		writer.addAttribute("name", "var.path.dest");
+		writer.addAttribute("value", "${" + antBuildDir + "}" + FS + "${" + antBuildFinalName + "}" + FS + varPathDest);
+		writer.endElement();// param
+		writer.endElement();// antcall
+	}
+
 	/**
 	 * Write javadoc target in the writer depending the packaging of the
 	 * project.
-	 * 
+	 *
 	 * @param writer
 	 * @throws IOException
 	 */
@@ -1020,7 +1160,7 @@ public class AntBuildWriter {
 	/**
 	 * Write package target in the writer depending the packaging of the
 	 * project.
-	 * 
+	 *
 	 * @param writer
 	 * @throws IOException .- if any
 	 */
@@ -1034,11 +1174,12 @@ public class AntBuildWriter {
 		writer.addAttribute("name", "package");
 
 		if (!AntBuildWriterUtil.isPomPackaging(project)) {
-			writer.addAttribute("depends", "compile,setup");
+			writer.addAttribute("depends", "compile");
 		}
 		writer.addAttribute("description", "Package the application");
 
 		if (AntBuildWriterUtil.isPomPackaging(project)) {
+			writer.addAttribute("depends", "files,setup");
 			if (project.getModules() != null) {
 				List<String> modules = project.getModules();
 				for (String moduleSubPath : modules) {
@@ -1057,7 +1198,8 @@ public class AntBuildWriter {
 				synonym = "war";
 			} else {
 				writer.startElement("echo");
-				writer.addAttribute("message", "No Ant task exists for the packaging '" + project.getPackaging() + "'. " + "You could overrided the Ant package target in your build.xml.");
+				writer.addAttribute("message", "No Ant task exists for the packaging '" + project.getPackaging()
+						+ "'. " + "You could overrided the Ant package target in your build.xml.");
 				writer.endElement(); // echo
 			}
 		}
@@ -1078,7 +1220,8 @@ public class AntBuildWriter {
 		}
 	}
 
-	private void writeCompileTasks(XMLWriter writer, String outputDirectory, List compileSourceRoots, List resources, String additionalClassesDirectory, boolean isTest) throws IOException {
+	private void writeCompileTasks(XMLWriter writer, String outputDirectory, List compileSourceRoots, List resources,
+			String additionalClassesDirectory, boolean isTest) throws IOException {
 		writer.startElement("mkdir");
 		writer.addAttribute("dir", outputDirectory);
 		writer.endElement(); // mkdir
@@ -1087,20 +1230,33 @@ public class AntBuildWriter {
 			writer.startElement("javac");
 			writer.addAttribute("destdir", outputDirectory);
 			Map[] includes = AntBuildWriterUtil.getMavenCompilerPluginOptions(project, "includes", null);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "includes", getCommaSeparatedList(includes, "include"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "includes",
+					getCommaSeparatedList(includes, "include"), 3);
 			Map[] excludes = AntBuildWriterUtil.getMavenCompilerPluginOptions(project, "excludes", null);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "excludes", getCommaSeparatedList(excludes, "exclude"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "encoding", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "encoding", null), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "nowarn", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "showWarnings", "false"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "debug", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "debug", "true"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "optimize", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "optimize", "false"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "deprecation", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "showDeprecation", "true"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "target", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "target", "1.1"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "verbose", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "verbose", "false"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "fork", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "fork", "false"), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "memoryMaximumSize", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "meminitial", null), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "memoryInitialSize", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "maxmem", null), 3);
-			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "source", AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "source", "1.3"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "excludes",
+					getCommaSeparatedList(excludes, "exclude"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "encoding",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "encoding", null), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "nowarn",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "showWarnings", "false"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "debug",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "debug", "true"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "optimize",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "optimize", "false"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "deprecation",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "showDeprecation", "true"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "target",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "target", "1.1"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "verbose",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "verbose", "false"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "fork",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "fork", "false"), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "memoryMaximumSize",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "meminitial", null), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "memoryInitialSize",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "maxmem", null), 3);
+			AntBuildWriterUtil.addWrapAttribute(writer, "javac", "source",
+					AntBuildWriterUtil.getMavenCompilerPluginBasicOption(project, "source", "1.3"), 3);
 
 			String[] compileSourceRootsArray = (String[]) compileSourceRoots.toArray(new String[0]);
 			for (int i = 0; i < compileSourceRootsArray.length; i++) {
@@ -1180,7 +1336,7 @@ public class AntBuildWriter {
 	 * directory separator. For example, the path "target/it-repo" will be
 	 * returned for a repository constructed from the URL
 	 * "file://${basedir}/target/it-repo".
-	 * 
+	 *
 	 * @param repoUrl
 	 *            The URL to the repository, must not be <code>null</code>.
 	 * @param projectDir
@@ -1228,7 +1384,7 @@ public class AntBuildWriter {
 
 	/**
 	 * Put a property in properties defined by a name and a value
-	 * 
+	 *
 	 * @param properties
 	 *            not null
 	 * @param name
@@ -1276,17 +1432,17 @@ public class AntBuildWriter {
 	/**
 	 * Flattens the specified file selector options into a simple string list.
 	 * For instance, the input
-	 * 
+	 *
 	 * <pre>
 	 * [ {include=&quot;*Test.java&quot;}, {include=&quot;*TestCase.java&quot;} ]
 	 * </pre>
-	 * 
+	 *
 	 * is converted to
-	 * 
+	 *
 	 * <pre>
 	 * [ &quot;*Test.java&quot;, &quot;*TestCase.java&quot; ]
 	 * </pre>
-	 * 
+	 *
 	 * @param options
 	 *            The file selector options to flatten, may be <code>null</code>
 	 *            .
